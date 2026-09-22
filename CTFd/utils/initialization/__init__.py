@@ -191,12 +191,20 @@ def init_logs(app):
 
 
 def init_events(app):
+    max_queue_size = app.config.get("SSE_CLIENT_QUEUE_MAXSIZE", 100)
+    max_client_age = app.config.get("SSE_CLIENT_MAX_AGE", 300) or None
     if app.config.get("CACHE_TYPE") == "redis":
-        app.events_manager = RedisEventManager()
+        app.events_manager = RedisEventManager(
+            max_queue_size=max_queue_size, max_client_age=max_client_age
+        )
     elif app.config.get("CACHE_TYPE") == "filesystem":
-        app.events_manager = EventManager()
+        app.events_manager = EventManager(
+            max_queue_size=max_queue_size, max_client_age=max_client_age
+        )
     else:
-        app.events_manager = EventManager()
+        app.events_manager = EventManager(
+            max_queue_size=max_queue_size, max_client_age=max_client_age
+        )
     app.events_manager.listen()
 
 
@@ -234,6 +242,8 @@ def init_request_processors(app):
                 "views.files",
                 "views.healthcheck",
                 "views.robots",
+                "probes.healthz",
+                "probes.readyz",
             ):
                 return
             else:
@@ -241,7 +251,12 @@ def init_request_processors(app):
 
     @app.before_request
     def tracker():
-        if request.endpoint in ("views.themes", "views.themes_beta"):
+        if request.endpoint in (
+            "views.themes",
+            "views.themes_beta",
+            "probes.healthz",
+            "probes.readyz",
+        ):
             return
 
         if import_in_progress():
@@ -283,7 +298,12 @@ def init_request_processors(app):
 
     @app.before_request
     def banned():
-        if request.endpoint in ("views.themes", "views.themes_beta"):
+        if request.endpoint in (
+            "views.themes",
+            "views.themes_beta",
+            "probes.healthz",
+            "probes.readyz",
+        ):
             return
 
         if authed():

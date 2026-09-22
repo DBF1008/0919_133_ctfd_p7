@@ -52,4 +52,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 USER 1001
 EXPOSE 8000
+# Container-level health check mirrors the Kubernetes /readyz readiness probe.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=5).status == 200 else 1)"
 ENTRYPOINT ["/opt/CTFd/docker-entrypoint.sh"]

@@ -327,6 +327,7 @@ def create_app(config="CTFd.config.Config"):
         from CTFd.challenges import challenges
         from CTFd.errors import render_error
         from CTFd.events import events
+        from CTFd.probes import probes
         from CTFd.scoreboard import scoreboard
         from CTFd.share import social
         from CTFd.teams import teams
@@ -341,6 +342,7 @@ def create_app(config="CTFd.config.Config"):
         app.register_blueprint(auth)
         app.register_blueprint(api)
         app.register_blueprint(events)
+        app.register_blueprint(probes)
         app.register_blueprint(social)
 
         app.register_blueprint(admin)
@@ -352,5 +354,9 @@ def create_app(config="CTFd.config.Config"):
         init_events(app)
         init_plugins(app)
         init_cli(app)
+
+        # Application finished initialization and is ready to
+        # receive traffic. Used by the /readyz readiness probe.
+        app.ready = True
 
         return app

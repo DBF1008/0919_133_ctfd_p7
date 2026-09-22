@@ -275,9 +275,53 @@ class ServerConfig(object):
 
     if DATABASE_URL.startswith("sqlite") is False:
         SQLALCHEMY_ENGINE_OPTIONS = {
-            "max_overflow": int(empty_str_cast(config_ini["optional"]["SQLALCHEMY_MAX_OVERFLOW"], default=20)),  # noqa: E131
-            "pool_pre_ping": empty_str_cast(config_ini["optional"]["SQLALCHEMY_POOL_PRE_PING"], default=True),  # noqa: E131
+            # pool_pre_ping validates connections on checkout so stale/dead
+            # MySQL connections are recycled instead of causing request 500s.
+            "pool_pre_ping": process_boolean_str(
+                empty_str_cast(config_ini["optional"]["SQLALCHEMY_POOL_PRE_PING"], default=True)
+            ),
+            # Recycle connections before the server closes them. MySQL's default
+            # wait_timeout is 28800s (8h); 280s is conservative and safe for
+            # managed databases and proxies that time out much sooner.
+            "pool_recycle": int(
+                empty_str_cast(config_ini["optional"]["SQLALCHEMY_POOL_RECYCLE"], default=280)
+                or 280
+            ),
+            # Persistent connections kept open in the pool.
+            "pool_size": int(
+                empty_str_cast(config_ini["optional"]["SQLALCHEMY_POOL_SIZE"], default=5)
+                or 5
+            ),
+            # Additional connections allowed above pool_size during spikes.
+            "max_overflow": int(
+                empty_str_cast(config_ini["optional"]["SQLALCHEMY_MAX_OVERFLOW"], default=20)
+                or 20
+            ),
+            # Seconds to wait for a connection from the pool before raising.
+            "pool_timeout": int(
+                empty_str_cast(config_ini["optional"]["SQLALCHEMY_POOL_TIMEOUT"], default=30)
+                or 30
+            ),
         }
+
+    # === SERVER-SENT EVENTS ===
+    # Maximum number of undelivered events buffered per SSE client. When the
+    # buffer is full the oldest events are dropped. Use 0 for an unbounded
+    # buffer (the historical behavior).
+    _sse_queue_maxsize = empty_str_cast(
+        config_ini["optional"]["SSE_CLIENT_QUEUE_MAXSIZE"], default=100
+    )
+    SSE_CLIENT_QUEUE_MAXSIZE: int = int(
+        _sse_queue_maxsize if _sse_queue_maxsize is not None else 100
+    )
+
+    # Maximum lifetime in seconds of a single SSE connection before the client
+    # is disconnected (EventSource reconnects automatically). This bounds the
+    # lifespan of half-open connections whose TCP death was never observed.
+    # Use 0 to disable the reaper and keep connections open indefinitely
+    # (the historical behavior).
+    _sse_max_age = empty_str_cast(config_ini["optional"]["SSE_CLIENT_MAX_AGE"], default=300)
+    SSE_CLIENT_MAX_AGE: int = int(_sse_max_age if _sse_max_age is not None else 300)
 
     # === OAUTH ===
     OAUTH_CLIENT_ID: str = empty_str_cast(config_ini["oauth"]["OAUTH_CLIENT_ID"])

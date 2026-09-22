@@ -1,7 +1,9 @@
+import time
 from collections import defaultdict
 from queue import Queue
 from unittest.mock import patch
 
+from gevent import getcurrent
 from redis.exceptions import ConnectionError
 
 from CTFd.config import TestingConfig
@@ -248,3 +250,77 @@ def test_redis_event_manager_listen():
 
         # importlib.reload(socket)
         # importlib.reload(time)
+
+
+def test_event_manager_unsubscribe_removes_client():
+    """Closing the subscription generator must always remove the client, even
+    if the consumer raised while iterating."""
+    event_manager = EventManager()
+    events = event_manager.subscribe()
+    next(events)
+    assert len(event_manager.clients) == 1
+
+    class Boom(Exception):
+        pass
+
+    try:
+        events.throw(Boom())
+    except Boom:
+        pass
+
+    assert len(event_manager.clients) == 0
+    assert len(event_manager._client_meta) == 0
+
+
+def test_event_manager_bounded_queue_drops_oldest():
+    """A slow/dead consumer must not be able to accumulate unbounded memory.
+    Published events beyond the queue capacity evict the oldest events and
+    never block the publisher."""
+    event_manager = EventManager(max_queue_size=2)
+    events = event_manager.subscribe()
+    next(events)
+
+    for i in range(10):
+        event_manager.publish(data=i, type="notification")
+
+    q = next(iter(event_manager.clients.values()))["ctf"]
+    received = []
+    while not q.empty():
+        received.append(q.get_nowait()["data"])
+    assert received == [8, 9]
+
+    events.close()
+    assert len(event_manager.clients) == 0
+
+
+def test_event_manager_reaps_stale_clients():
+    """Clients older than max_client_age are disconnected by the reaper so
+    that a half-open TCP connection cannot leak its Queue forever."""
+    event_manager = EventManager(max_client_age=1)
+    assert len(event_manager.clients) == 0
+
+    # Simulate an aged entry directly and ensure reaping removes it
+    stale = defaultdict(Queue)
+    event_manager.clients[id(stale)] = stale
+    event_manager._client_meta[id(stale)] = {
+        "created_at": time.monotonic() - 100,
+        "greenlet": getcurrent(),
+    }
+    event_manager._reap_stale_clients()
+    assert len(event_manager.clients) == 0
+    assert len(event_manager._client_meta) == 0
+
+
+def test_event_manager_reap_skips_fresh_clients():
+    """Recently connected clients must not be reaped."""
+    import time
+
+    event_manager = EventManager(max_client_age=300)
+    fresh = defaultdict(Queue)
+    event_manager.clients[id(fresh)] = fresh
+    event_manager._client_meta[id(fresh)] = {
+        "created_at": time.monotonic(),
+        "greenlet": getcurrent(),
+    }
+    event_manager._reap_stale_clients()
+    assert len(event_manager.clients) == 1
