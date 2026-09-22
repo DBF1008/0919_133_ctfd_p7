@@ -43,7 +43,12 @@ from CTFd.utils.config.pages import build_markdown, get_page
 from CTFd.utils.config.visibility import challenges_visible
 from CTFd.utils.dates import ctf_ended, ctftime, view_after_ctf
 from CTFd.utils.decorators import authed_only
-from CTFd.utils.health import check_config, check_database
+from CTFd.utils.health import (
+    check_config,
+    check_database,
+    check_database_connection,
+    check_startup_complete,
+)
 from CTFd.utils.helpers import get_errors, get_infos, markup
 from CTFd.utils.modes import USERS_MODE
 from CTFd.utils.security.auth import login_user
@@ -532,6 +537,43 @@ def healthcheck():
     if check_config() is False:
         return "ERR", 500
     return "OK", 200
+
+
+def _probe_response(ok):
+    response = make_response("ok" if ok else "error", 200 if ok else 503)
+    response.mimetype = "text/plain"
+    # Probes must never be served a cached response
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@views.route("/healthz")
+def healthz():
+    """
+    Liveness probe for load balancers / Kubernetes.
+
+    Only checks that the process is up and able to serve. Dependencies are
+    intentionally not checked here: a failing dependency would otherwise make
+    the liveness probe fail and trigger a restart loop, which never helps a
+    transient database outage.
+    """
+    return _probe_response(True)
+
+
+@views.route("/readyz")
+def readyz():
+    """
+    Readiness probe. Returns 503 until the application has fully started and all
+    required dependencies (database, cache) are reachable, so that traffic is
+    not sent to a worker that cannot handle it yet.
+    """
+    ready = (
+        check_startup_complete()
+        and check_database() is not False
+        and check_database_connection()
+        and check_config() is not False
+    )
+    return _probe_response(ready)
 
 
 @views.route("/debug")

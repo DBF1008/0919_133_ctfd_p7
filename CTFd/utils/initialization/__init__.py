@@ -233,6 +233,8 @@ def init_request_processors(app):
                 "views.themes_beta",
                 "views.files",
                 "views.healthcheck",
+                "views.healthz",
+                "views.readyz",
                 "views.robots",
             ):
                 return

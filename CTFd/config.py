@@ -94,6 +94,27 @@ path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.ini")
 config_ini.read(path)
 
 
+def sqlalchemy_engine_options(parser):
+    """
+    Build SQLAlchemy engine/pool options from the [optional] config section.
+
+    pool_pre_ping validates pooled connections before use and pool_recycle
+    proactively recycles them, preventing 500s from connections silently closed
+    by MySQL (wait_timeout) or an intermediate load balancer.
+    """
+    return {
+        "pool_pre_ping": process_boolean_str(
+            empty_str_cast(parser["optional"]["SQLALCHEMY_POOL_PRE_PING"], default=True)
+        ),
+        "pool_recycle": int(
+            empty_str_cast(parser["optional"]["SQLALCHEMY_POOL_RECYCLE"], default=280)
+        ),
+        "max_overflow": int(
+            empty_str_cast(parser["optional"]["SQLALCHEMY_MAX_OVERFLOW"], default=20)
+        ),
+    }
+
+
 # fmt: off
 class ServerConfig(object):
     SECRET_KEY: str = empty_str_cast(config_ini["server"]["SECRET_KEY"]) \
@@ -274,10 +295,14 @@ class ServerConfig(object):
             _FORCED_EXTRA_CONFIG_TYPES[k] = v
 
     if DATABASE_URL.startswith("sqlite") is False:
-        SQLALCHEMY_ENGINE_OPTIONS = {
-            "max_overflow": int(empty_str_cast(config_ini["optional"]["SQLALCHEMY_MAX_OVERFLOW"], default=20)),  # noqa: E131
-            "pool_pre_ping": empty_str_cast(config_ini["optional"]["SQLALCHEMY_POOL_PRE_PING"], default=True),  # noqa: E131
-        }
+        # Non-SQLite databases (typically MySQL) drop idle connections after a
+        # server-side wait_timeout / load balancer idle timeout. pre_ping makes
+        # SQLAlchemy validate a pooled connection with a cheap query before
+        # handing it out; pool_recycle proactively recycles connections before
+        # they can go stale. Together they prevent 500s caused by dead pooled
+        # connections and remove the need for the scattered db.session.close()
+        # workaround calls.
+        SQLALCHEMY_ENGINE_OPTIONS = sqlalchemy_engine_options(config_ini)
 
     # === OAUTH ===
     OAUTH_CLIENT_ID: str = empty_str_cast(config_ini["oauth"]["OAUTH_CLIENT_ID"])

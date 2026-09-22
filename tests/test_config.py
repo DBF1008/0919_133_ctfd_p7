@@ -448,3 +448,46 @@ def test_preset_configs():
         assert get_config("database_only_setting") == "database_value"
 
     destroy_ctfd(app)
+
+
+def test_sqlalchemy_engine_options_defaults():
+    """Default pool options enable pre_ping and a safe recycle interval."""
+    from CTFd.config import config_ini, sqlalchemy_engine_options
+
+    options = sqlalchemy_engine_options(config_ini)
+
+    assert options["pool_pre_ping"] is True
+    assert options["pool_recycle"] == 280
+    assert options["max_overflow"] == 20
+
+
+def test_sqlalchemy_engine_options_custom_values():
+    """Pool options can be overridden through config values."""
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read_dict(
+        {
+            "optional": {
+                "SQLALCHEMY_POOL_PRE_PING": "false",
+                "SQLALCHEMY_POOL_RECYCLE": "60",
+                "SQLALCHEMY_MAX_OVERFLOW": "5",
+            }
+        }
+    )
+
+    from CTFd.config import sqlalchemy_engine_options
+
+    options = sqlalchemy_engine_options(parser)
+
+    assert options["pool_pre_ping"] is False
+    assert options["pool_recycle"] == 60
+    assert options["max_overflow"] == 5
+
+
+def test_sqlalchemy_engine_options_not_set_for_sqlite():
+    """SQLite (the testing database) does not configure pooled engine options."""
+    app = create_ctfd()
+    with app.app_context():
+        assert not app.config.get("SQLALCHEMY_ENGINE_OPTIONS")
+    destroy_ctfd(app)

@@ -353,4 +353,7 @@ def create_app(config="CTFd.config.Config"):
         init_plugins(app)
         init_cli(app)
 
+        from CTFd.utils.health import set_ready
+
+        set_ready()
         return app
